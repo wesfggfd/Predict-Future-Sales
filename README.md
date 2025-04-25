@@ -112,3 +112,51 @@ np.sqrt(mean_squared_error(y_true,y_pred))
 2. **Entity Relationship Modeling**: Shop-item pair matrix prevented cold-start issues
 3. **Semantic Feature Extraction**: Name parsing uncovered latent categorical relationships
 4. **Memory-Efficient Encoding**: 8-bit/16-bit types enabled full-history retention
+
+## ========= V2 Predict with LSTM
+
+
+## 1. Data Loading & Preprocessing
+
+### 1.1 Load Datasets
+
+```python
+import pandas as pd
+
+# Load raw data
+
+train_df = pd.read_csv('/kaggle/input/.../sales_train.csv') # Historical sales data
+test_df = pd.read_csv('/kaggle/input/.../test.csv') # Test set with shop/item IDs
+
+items_df = pd.read_csv('/kaggle/input/.../items.csv') # Item metadata
+
+# Verify data integrity
+
+print("Missing values in trainning data:", train_df.isna().sum()) # 0
+print("Mising vales in test data:", test_df.isna().sum()) # 0
+```
+
+### 1.2 Temporal Alignment
+
+```python
+# Prepare test set for merging
+
+test_Data = test_df.copy()
+
+test_Data['date_block_num'] = 34 # Future prediction point (month 34)
+test_Data['item_cnt_day'] = 0 #Placeholder column
+
+# Reshape training data into (shop_id, item_id) x time matrix
+
+train_Data = train_df.pivot_table(index=['shop_id', 'item_id'], columns='date_block_num', values='item_cnt_day', aggfunc='sum', fill_value=0) # Shape: (unique shop-item pairs) x 33 months (0-32)
+
+# Merge test set with historical data
+Combine_train_test = pd.merge(test_Data[['shop_id', 'item_id', 'date_block_num']], train_Data, on=['shop_id', 'item_id'], how='left').fillna(0)
+```
+
+---
+
+## 2. Feature Engineering
+
+
+### 2.1 Normalization
