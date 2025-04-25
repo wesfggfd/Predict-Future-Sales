@@ -113,7 +113,10 @@ np.sqrt(mean_squared_error(y_true,y_pred))
 3. **Semantic Feature Extraction**: Name parsing uncovered latent categorical relationships
 4. **Memory-Efficient Encoding**: 8-bit/16-bit types enabled full-history retention
 
-## ========= V2 Predict with LSTM (RMSE 1.11770)
+
+
+
+# ========= V2 Predict with LSTM (RMSE 1.11770)
 
 
 ## 1. Data Loading & Preprocessing
