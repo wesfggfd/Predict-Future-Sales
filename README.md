@@ -113,7 +113,7 @@ np.sqrt(mean_squared_error(y_true,y_pred))
 3. **Semantic Feature Extraction**: Name parsing uncovered latent categorical relationships
 4. **Memory-Efficient Encoding**: 8-bit/16-bit types enabled full-history retention
 
-## ========= V2 Predict with LSTM
+## ========= V2 Predict with LSTM (RMSE 1.11770)
 
 
 ## 1. Data Loading & Preprocessing
@@ -160,3 +160,15 @@ Combine_train_test = pd.merge(test_Data[['shop_id', 'item_id', 'date_block_num']
 
 
 ### 2.1 Normalization
+
+
+```Python
+from sklearn.preprocessing import MinMaxScaler
+
+# Keep only numerical features for scaling
+numerical_data = Combine_train_test.iloc[:, 3:-1]   #Exclude metadata columns
+
+#Scale to [0,1] range
+scaler = MinMaxScaler(feature_range=(0, 1))
+scaled_data = scaler.fit_transform(numerical_data)
+```
