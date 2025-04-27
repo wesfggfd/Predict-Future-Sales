@@ -170,7 +170,12 @@ $$
 
 Controls new information addition:
 
-![multirows](https://latex.codecogs.com/svg.image?\begin{align}i_t=\sigma(W_i\cdot[h_{t-1},x_t]&plus;b_i)\\\tilde{C}_t=\tanh(W_C\cdot[h_{t-1},x_t]&plus;b_C\)\end{align})
+$$
+\begin{align}
+i_t = \sigma(W_i \cdot [h_{t-1}, x_t] + b_i)\\
+\tilde{C}_t = \tanh(W_C \cdot [h_{t-1}, x_t] + b_C\)
+\end{align}
+$$
 
 
 ## 1. Data Loading & Preprocessing
