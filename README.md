@@ -170,12 +170,44 @@ $$
 
 Controls new information addition:
 
-$$
-\begin{align}
-i_t = \sigma(W_i \cdot [h_{t-1}, x_t] + b_i)\\
-\tilde{C}_t = \tanh(W_C \cdot [h_{t-1}, x_t] + b_C\)
-\end{align}
-$$
+![](https://latex.codecogs.com/svg.image?\begin{align}i_t&=%20\sigma(W_i%20\cdot%20[h_{t-1},x_t]%20+%20b_i)%5C%5C\tilde{C}_t&=%20\tanh(W_C%20\cdot%20[h_{t-1},x_t]%20+%20b_C)\end{align})
+
+
+- $$i_t$$: Sigmoid gate determines update magnitude
+- $$\tilde{C}_t$$: Tanh-activated candidate values (-1 to 1)
+
+
+# 2.3 Output Gate ($$o_t$$)
+
+Determines exposed cell state to next layer:
+
+![](https://latex.codecogs.com/svg.image?\begin{align}o_t&=%20\sigma(W_o%20\cdot%20[h_{t-1},x_t]%20+%20b_o)%5C%5Ch_t&=%20o_t%20\odot%20\tanh(C_t)\end{align})
+
+- Final output combines filtered cell state and gate regulation
+
+
+# 3. Complete Computational Flow
+
+At each timestep $$t$$:
+
+1. Gate Activations:
+   - Compute $$f_t,i_t,o_t$$ via sigmoid transforms
+
+2. State Updates:
+   - Generate candidate $$\tilde{C}_t$$ with tanh
+   - Update $$\tilde{C}_t$$ using forget/input gates
+
+3. Output Generation:
+   - Filter $$\tilde{C}_t$$ through output gate to get $$h_t$$
+
+
+
+
+# 4. Mathematical Implementation
+
+Full sequence processing equations:
+
+![](https://latex.codecogs.com/svg.image?\begin{align}f_t&=%20\sigma(W_f%20\cdot%20[h_{t-1},x_t]%20+%20b_f)%5C%5Ci_t&=%20\sigma(W_i%20\cdot%20[h_{t-1},x_t]%20+%20b_i)%5C%5C\tilde{C}_t&=%20\tanh(W_C%20\cdot%20[h_{t-1},x_t]%20+%20b_C)%5C%5CC_t&=%20f_t%20\odot%20C_{t-1}%20+%20i_t%20\odot%20\tilde{C}_t%5C%5Co_t&=%20\sigma(W_o%20\cdot%20[h_{t-1},x_t]%20+%20b_o)%5C%5Ch_t&=%20o_t%20\odot%20\tanh(\tilde{C}_t)\end{align})
 
 
 ## 1. Data Loading & Preprocessing
