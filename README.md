@@ -116,7 +116,61 @@ np.sqrt(mean_squared_error(y_true,y_pred))
 
 
 
+
+
+
 # ========= V2 Predict with LSTM (RMSE 1.11770)
+
+
+
+
+
+# Introduction: Long Shor-Term Memory (LSTM) Architecture
+
+- LSTM is a specialized recurrent neural network designed to capture long-range dependencies through gated mechanisms and memory cells . Its core components are:
+
+
+# 1. Memory Cell ($$C_t$$)
+
+The central innovation of LSTM, acting as a "conveyor belt" for long-term information storage: 
+
+$$
+C_t = f_t \odot C_{t-1} + i_t \odot \tilde{C}_t
+$$
+
+- Function: Stores contextual information across arbitrary time intervals
+- Key Properties:
+   - Linear updates prevent gradient vanishing/exploding
+   - Capacity grows with hidden layer size (typically 100-1000 units)
+   - Retains information unless explicitly modified by gates
+
+
+# 2. Gates Mechanisims
+
+Three adaptive gates regulate information flow through sigmoid activations (σ) and element-wise multiplication (⊙):
+
+
+# 2.1 Forget Gates ($$f_t$$)
+
+Decides what to discard from previous cell state:
+
+$$
+f_t = \sigma(W_f \cdot h_{t-1}, x_t + b_f)
+$$
+
+- Inputs: Previous hidden state $$h_{t-1}$$ and current input $$x_t$$
+- Weights: $$W_f$$ (gate-specific parameter matrix)
+- Behavior:
+   - 0 = "Completely forget"
+   - 1 = "Completely retain"
+
+
+
+# 2.2 Input Gate ($$i_t$$) & Candidate State ($$\tilde{C}_t$$)
+
+Controls new information addition:
+
+![multirows](https://latex.codecogs.com/svg.image?\begin{align}i_t=\sigma(W_i\cdot[h_{t-1},x_t]&plus;b_i)\\\tilde{C}_t=\tanh(W_C\cdot[h_{t-1},x_t]&plus;b_C\)\end{align})
 
 
 ## 1. Data Loading & Preprocessing
@@ -175,3 +229,7 @@ numerical_data = Combine_train_test.iloc[:, 3:-1]   #Exclude metadata columns
 scaler = MinMaxScaler(feature_range=(0, 1))
 scaled_data = scaler.fit_transform(numerical_data)
 ```
+
+### 2.2 Sequence Creation 
+
+``
