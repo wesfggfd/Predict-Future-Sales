@@ -1,8 +1,17 @@
+# English Summary:
+
+Starting with a baseline XGBoost model (RMSE = 1.23151), introducing an LSTM-based approach yielded a modest 6.3% reduction in error (RMSE = 1.15367). However, by combining extensive feature engineering with a LightGBM regressor, we achieved a further 27.5% drop in RMSE, ultimately reducing the error by 32.0% from the original XGBoost baseline (down to RMSE = 0.83687). This highlights the substantial value of tailored features in boosting predictive accuracy beyond model architecture alone.
+
+
+
+
 # Future Sales Prediction Feature Engineering (RMSE: 1.21721)
 
 This document details the core feature engineering strategies implemented to achieve RMSE 1.21721 in the sales prediction competition.
 
 Dataset url:(https://www.kaggle.com/competitions/competitive-data-science-predict-future-sales/data)
+
+Kaggle url:(https://www.kaggle.com/code/seanchenxinyu/baseline-with-xgb)
 
 ## Key Feature Categories
 
@@ -121,6 +130,7 @@ np.sqrt(mean_squared_error(y_true,y_pred))
 
 # ========= V2 Predict with LSTM (RMSE 1.11770)
 
+Kaggle url:(https://www.kaggle.com/code/seanchenxinyu/time-series-lstm-training-improvement)
 
 
 
@@ -413,3 +423,346 @@ submission.to_csv('submission.csv',index=False)
    - Left join preserves all test samples (214,200 rows)
    - MinMax scaling prevents large-value dominance in LSTM
    - Sequence reshaping enables time-step processing
+
+
+
+
+
+
+# ========= V3 Predict Future with Ultimate Feature Engineering & LightGBM (RMSE 0.83687)
+
+Kaggle url:(https://www.kaggle.com/code/seanchenxinyu/future-sales-predictions)
+
+
+# Introduction
+
+This project demonstrates an end-to-end pipeline for predicting future sales volumes in a retail setting using a LightGBM regressor. We cover:
+
+- Memory optimization for large tabular data.
+- Advanced temporal and categorical feature engineering.
+- Bag-of-words text features from product names.
+- LightGBM training with hyperparameter tuning and early stopping.
+- Model evaluation (RMSE) and feature importance analysis.
+
+
+## Data Loading & Preprocessing
+
+**1. Importing Libraries**
+
+```python
+import gc
+import itertools
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd 
+import seaborn as sns
+```
+
+Ensure consistent random seeds for reproducibility:
+
+```python
+import random
+import os
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+```
+
+**2. Load CSV Files**
+
+```python
+items = pd.read_csv('data/items.csv')        # (22170, 3)
+shops = pd.read_csv('data/shops.csv')        # (60, 2)
+sales = pd.read_csv('data/sales_train.csv') # (~3 million rows)
+test  = pd.read_csv('data/test.csv')        # (~214200 rows)
+```
+
+**3. Memory Optimization**
+
+```reduce_mem_usage``` is designed to dramatically lower the RAM footprint of a pandas DataFrame by automatically downcasting column data types and encoding category-like columns. Its operation can be broken down into these steps:
+
+- **1. Iterate over each column**
+- **2. Numeric downcasting** which aims to shrink the integer width (e.g. int64 -> int32 -> int16, etc.) as long as it still fits the existing values.
+  - **Floats:** After integer downcasting, any float columns are cast to float32 (half the size of float64).
+- **3. Categorical encoding**
+  - Non-numeric, non-datetime columns (typically object strings) are optionally factorized: each unique string is mapped to a small integer code.
+  - This replaces bulky Python objects with simple int arrays.
+- **4. Datetime and sparse columns**
+- **5. Silent mode & reporting**
+
+```python
+def reduce_mem_usage(df, float_dtype='float32'):  
+    for col in df.columns:
+        col_type = df[col].dtype
+        if pd.api.types.is_numeric_dtype(col_type):
+            df[col] = pd.to_numeric(df[col], downcast='integer')
+            if pd.api.types.is_float_dtype(df[col]):
+                df[col] = df[col].astype(float_dtype)
+        else:
+            df[col], _ = pd.factorize(df[col])
+    return df
+# Apply:
+items = reduce_mem_usage(items)
+shops = reduce_mem_usage(shops)
+sales = reduce_mem_usage(sales)
+```
+
+Example: A 3 million-row sales table with mixed 64-bit types might shrink from ~4 GB to ~1.5 GB (≈60% reduction) after applying ```reduce_mem_usage```
+
+
+
+**4. Data Cleaning**
+
+```python
+# Parse dates
+sales['date'] = pd.to_datetime(sales['date'], format='%d.%m.%Y')
+# Merge duplicate shops per Kaggle discussion
+sales['shop_id'] = sales['shop_id'].replace({0:57,1:58,11:10,40:39})
+# Filter shops present in test set
+valid_shops = test['shop_id'].unique()
+sales = sales[sales['shop_id'].isin(valid_shops)].copy()
+# Remove outliers
+sales = sales[(sales['item_price'] > 0) & (sales['item_price'] < 50000)]
+sales = sales[(sales['item_cnt_day'] > 0) & (sales['item_cnt_day'] < 1000)]
+```
+
+### Feature Engineering
+
+### Overview of the Step:
+
+Generate a master matrix of shape  where each row represents one (month, shop, item) and columns are features.
+
+# 1.Base Matrix Construction:
+
+```create_monthly_matrix```
+
+```python
+def create_monthly_matrix(sales, test):
+    rows = []
+    for block in sales['date_block_num'].unique():
+        shops = sales[sales.date_block_num==block]['shop_id'].unique()
+        items = sales[sales.date_block_num==block]['item_id'].unique()
+        rows.append(list(itertools.product([block], shops, items)))
+    matrix = pd.DataFrame(np.vstack(rows), columns=['date_block_num','shop_id','item_id'])
+    # Aggregate monthly sales & revenue
+grouped = sales.groupby(['date_block_num','shop_id','item_id']).agg(
+    item_cnt_month=('item_cnt_day','sum'),
+    item_revenue_month=('item_price','sum')
+)
+matrix = matrix.merge(grouped, how='left', on=['date_block_num','shop_id','item_id']).fillna(0)
+# Append test month
+... return matrix
+```
+
+- **Shape: ~4 million rows x features**
+
+# 2.Categorical & Text Features
+
+## 2.1 Fuzzy Name Groups
+
+- Use ```fuzzywuzzy.partial_ratio``` to assign each ```item_name``` into ```item_name_group```.
+- Threshold similarity = 65.
+
+## 2.2 Artist / First Word
+
+- For music items, extract artist name patterns (uppercase, double spaces).
+- Else: first non-stopword token
+
+## 2.3 Bag-of-Words on ```item_name```
+
+```python
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_selection import SelectKBest, f_regression
+vectorizer = CountVectorizer(stop_words=stopwords)
+X_bow = vectorizer.fit_transform(items['item_name_clean'])
+# Select top 50 words predictive of sales
+selector = SelectKBest(f_regression, k=50)
+selector.fit(X_bow, y)
+```
+
+# 3.Temporal Features
+
+## 3.1 Time Differences & Averages
+
+- ```month_first_day```,```month_last_day```,```month_length```
+- ```first_shop_date```,```first_item_date```,```first_shop_item_date```
+- Compute days active to drive ```item_cnt_day_avg```:
+
+
+![](https://latex.codecogs.com/svg.image?%5Ctexttt%7Bitem%5C_cnt%5C_day%5C_avg%7D=%5Cfrac%7B%5Ctexttt%7Bitem%5C_cnt%5C_month%7D%7D%7Bmin(%5Ctexttt%7Bdays%5C_in%5C_shop%7D,%5Ctexttt%7Bmonth%5C_length%7D)%7D)
+
+- Features: ```shop_age```,```item_age```,```new_item```,```last_shop_item_sale_days```,```month```
+
+
+## 3.2 Price Trends
+
+- Monthly mean price & normalized deviation per category.
+- Lagged price: previous month values.
+
+
+# 4.Rolling & Lag Features
+
+## 4.1 Percent Change
+
+Compute $$\frac{v_t - v_{t-k}}{v_{t-k}}$$ clamped to [-3,3] for k=1,12.
+
+
+## 4.2 Rolling/Expanding/EWMA
+
+```python
+# Example: 12-month rolling mean of item_cnt_month per (shop_id,item_id)
+matrix['shop_item_12m_mean'] = matrix.groupby(['shop_id','item_id'])['item_cnt_month'] \
+    .rolling(window=12, min_periods=1).mean().reset_index(0,drop=True)
+```
+
+- Generate features for multiple windows (1,3,6,12 months) and group combinations.
+
+
+## 4.3 Mean Encoding
+
+```python
+# Mean sales per item_id lagged by 1 month
+mean_sales = matrix.groupby(['date_block_num','item_id'])['item_cnt_month'].mean().rename('item_mean')
+mean_sales = mean_sales.reset_index()
+mean_sales['date_block_num'] += 1
+matrix = matrix.merge(mean_sales, on=['date_block_num','item_id'], how='left')
+```
+
+
+
+# Model Training & Evaluation
+
+## 1. Data Split
+
+```python
+train = matrix[matrix.date_block_num < 33]
+val   = matrix[matrix.date_block_num == 33]
+X_train, y_train = train.drop(['item_cnt_month'], axis=1), train['item_cnt_month']
+X_val, y_val     = val.drop(['item_cnt_month'], axis=1), val['item_cnt_month']
+```
+
+## 2. LightGBM Training Function
+
+```python
+import lightgbm as lgb
+params = {
+    'objective': 'regression',
+    'metric': 'rmse',
+    'num_leaves': 966,
+    'learning_rate': 0.01,
+    'n_estimators': 8000,
+    'subsample': 0.6,
+    'colsample_bytree': 0.8,
+    'min_child_samples': 27,
+    'early_stopping_round': 30
+}
+model = lgb.LGBMRegressor(**params)
+model.fit(
+    X_train, y_train,
+    eval_set=[(X_train,y_train),(X_val,y_val)],
+    categorical_feature=['item_category_id','month'],
+    verbose=100
+)
+```
+
+- **Training RMSE** convergence log printed every 100 rounds.
+
+
+## 3. Evaluation
+
+- Compute RMSE on validation set:
+
+```python
+from sklearn.metrics import mean_squared_error
+rmse = mean_squared_error(y_val, model.predict(X_val), squared=False)
+print(f"Validation RMSE: {rmse:.4f}")
+```
+
+## 4. Feature Importance
+
+```python
+lgb.plot_importance(model, importance_type='gain', max_num_features=30)
+plt.title('Top 30 Feature Importances');
+```
+
+
+
+# Prediction & Submission
+
+```python
+# Prepare test data for month 34
+test_matrix = ...  # same features
+preds = model.predict(test_matrix.drop('item_cnt_month', axis=1)).clip(0,20)
+submission = pd.DataFrame({
+    'ID': test['ID'],
+    'item_cnt_month': preds
+})
+submission.to_csv('submission.csv', index=False)
+```
+histpo
+# LightGBM Technical Overview
+
+- **Gradient Boosting**: Fit trees on residual errors.
+- **Histogram-based splitting**: Bin continuous features into discrete buckets.
+- **Leaf-wise growth**: choose leaf with maximum split gain.
+- **Regularization**: controlled via parameters ```lambda_l1```,```lambda_l2```,```min_gain_to_split```.
+
+
+Regularization term:
+
+![](https://latex.codecogs.com/svg.image?%5COmega(f)=%5Cgamma%20T&plus;%5Cfrac%7B1%7D%7B2%7D%5Clambda%5Csum_%7Bj=1%7D%5E%7BT%7Dw_j%5E2)
+
+
+# Advantages on Small Datasets
+
+1. **Quick Convergence**: Leaf-wise splitting captures complex patterns with fewer trees.
+2. **Built-in Overfitting Control**: early stopping, ```min_child_samples```, L1/L2 regularization.
+3. **Low Overhead**: histogram binning reduces computation and memory footprint.
+4. **Native Categorical Handling**: automatically handles categorical features without one-hot encoding.
+
+
+
+# Features Handling
+
+
+- 1. Memory Optimization (reduce_mem_usage)
+
+- 2.Base Matrix Construction (create_testlike_train)
+
+- 3.Fuzzy Name Grouping (add_item_name_groups)
+
+- 3.Artist or First-Word Feature (add_first_word_features)
+
+- 4.Name Length Features
+
+- 5.Time-Based Features (add_time_features)
+
+- 6.Price Features (add_price_features)
+
+- 7.Platform ID Mapping
+
+- 8.Supercategory ID Mapping
+
+- 9.City Code Encoding (add_city_codes)
+
+- 10.Category Clustering (cluster_feature)
+
+- 11.Shop Clustering (cluster_feature)
+
+- 12.Unique Count Features (uniques)
+
+- 13.Lagged Percent-Change Features (add_pct_change)
+
+- 14.Rolling, Expanding & EWMA Window Features (add_rolling_stats)
+
+- 15.Simple Lag Features (simple_lag_feature)
+
+- 16.Mean-Encoding Features (create_apply_ME)
+
+- 17.Bag-of-Words Text Features + SelectKBest (name_token_feats)
+
+
+
+
+
+
