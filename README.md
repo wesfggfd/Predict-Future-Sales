@@ -210,9 +210,34 @@ Full sequence processing equations:
 ![](https://latex.codecogs.com/svg.image?\begin{align}f_t&=%20\sigma(W_f%20\cdot%20[h_{t-1},x_t]%20+%20b_f)%5C%5Ci_t&=%20\sigma(W_i%20\cdot%20[h_{t-1},x_t]%20+%20b_i)%5C%5C\tilde{C}_t&=%20\tanh(W_C%20\cdot%20[h_{t-1},x_t]%20+%20b_C)%5C%5CC_t&=%20f_t%20\odot%20C_{t-1}%20+%20i_t%20\odot%20\tilde{C}_t%5C%5Co_t&=%20\sigma(W_o%20\cdot%20[h_{t-1},x_t]%20+%20b_o)%5C%5Ch_t&=%20o_t%20\odot%20\tanh(\tilde{C}_t)\end{align})
 
 
-## 1. Data Loading & Preprocessing
+Dimissions:
+ - $$W_* \in \mathbb{R}^{d_h \times (d_h + d_x)}$$ for hidden size $$d_h$$ and input size $$d_x$$
+ - All gates share same hidden/input concatenation $$[h_{t-1},x_t]$$
+
+
+
+# 5. Design Advantages 
+
+- Gradient Stability: Cell state linearity prevents multiplicative gradient decay
+- Contextual Awareness: Gates adaptively filter irrelevant features (e.g., noise)
+- Multi-Scale Learning:
+  - $$h_t$$ captures short-term patterns
+  - $$C_t$$ preserves long-term trends
+
+
+Benchmark Performance:
+
+- 35% higher accuracy than vanilla RNNs on IMDB sentiment analysis
+- 15%-20% lower prediction error than ARIMA in financial forecasting
+
+
+
+
+
+# 1. Data Loading & Preprocess
 
 ### 1.1 Load Datasets
+
 
 ```python
 import pandas as pd
@@ -269,4 +294,122 @@ scaled_data = scaler.fit_transform(numerical_data)
 
 ### 2.2 Sequence Creation 
 
-``
+```python
+
+# Training data: Use months 0-32 to predict month 33
+
+X_train = scaled_data[:,:33].reshape(-1,33,1) # Shape:(214200,33,1)
+y_train = scaled_data[:,33] # Target values
+
+# Teat data: Use months 1-33 to predict month 34
+
+X_test = scaled_data[:,1:34].reshape(-1,33,1) # Shape: (214200,33,1)
+```
+
+---
+
+
+## 3. LSTM Model
+
+
+### 3.1 Architecture
+
+```python
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM,Dense
+
+model = Sequential()
+
+model.add(LSTM(50, return_sequences=True, input_shape=(33,1))) # First LSTM layer
+
+model.add(LSTM(50, return_sequences=False)) # Second LSTM layer
+
+model.add(Dense(1)) # Regression output
+
+model.compile(loss='mse', optimizer='adam', metrics=['mse'])
+
+model.summary()
+```
+
+**Model Structure**:
+
+**Layer (type) Output Shape Param**
+
+LSTM 10400 (None,33,50)
+
+LSTM 20200 (None,50)
+
+
+**Dense (None,1)   51**
+
+Total params: 30,651
+
+### 3.2 Training
+
+```python
+history = model.fit(X_train, y_train, batch_size=128, epochs=10, verbose=1)
+```
+
+
+---
+
+
+## 4. Prediction & Result
+
+
+### 4.1 Inverse Transformation
+
+```python
+
+# Create dummy array for inverse scaling
+dummy_array = np.zeros((X_test.shape[0],34))
+
+dummy_array[:,1:34] = X_test.reshape(X_test.shape(0),33)
+
+# Predict and inverse-transform
+
+predicted = model.predict(X_test)
+
+dummy_array[:,-1] = predicted.flatten()
+
+final_predictions = scaler.inverse_transform(dummy_array)[:,-1]
+```
+
+
+
+### 4.2 Post-processing
+
+```python
+
+# Apply competition constraints
+
+final_predictions = np.clip(final_predictions,0,30).round().astype(int)
+
+# Generate submission
+
+submission = pd.read_csv('.../sample_submission.csv')
+submission['item_cnt_month'] = final_predictions
+submission.to_csv('submission.csv',index=False)
+```
+
+
+### 4.3 Final Metric
+**RMSE**: 1.23151 (Root Mean Squared Error on test set)
+
+---
+
+## 5. Key Implementation Notes
+
+1. **Temporal Structure**:
+   - Training sequences: 33 months (0-32) → Predict month 33
+   - Test sequences: 33 months (1-33) → Predict month 34
+
+2. **Data Shapes**:
+   - Original training data: `(2,935,849, 5)` rows
+   - Pivoted training data: `(34,250, 33)` (unique shop-item pairs x months)
+   - Final input shape: `(214,200, 33, 1)` (test samples x sequence length x features)
+
+3. **Critical Operations**:
+   - Left join preserves all test samples (214,200 rows)
+   - MinMax scaling prevents large-value dominance in LSTM
+   - Sequence reshaping enables time-step processing
